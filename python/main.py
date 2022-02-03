@@ -9,17 +9,22 @@ from tqdm import tqdm
 
 parser = argparse.ArgumentParser(description="MITOMI data analysis")
 parser.add_argument("--head", type=int, default=math.inf, help="Only process the first k images")
+parser.add_argument("--only", type=int)
 parser.add_argument("--out", help="Path to an output file (defaults to stdout)")
 parser.add_argument("--silent", action="store_true")
-parser.add_argument("--test", choices=["background_mask", "button_circle", "button_hough", "edges", "signal_mask"])
+parser.add_argument("--test", choices=["background_mask", "button_circle", "button_hough", "edges", "masks", "signal_mask"])
 parser.add_argument("file1", metavar="background", help="Path to the background data")
 parser.add_argument("file2", metavar="signal", help="Path to the signal data")
+# + layout
 
 analysis_options = parser.add_argument_group("Analysis options")
 analysis_options.add_argument("--settings", metavar="<path>", type=str, help="Path to a settings file")
 analysis_options.add_argument("--save-settings", metavar="<path>", const=sys.stdout, nargs="?", type=argparse.FileType("w"), help="Path to a new settings file")
+
+analysis_options.add_argument("--background-inner-radius", metavar="<radius>", type=int, help="(default: 100")
+analysis_options.add_argument("--background-outer-radius", metavar="<radius>", type=int, help="(default: 150")
 analysis_options.add_argument("--button-radius", metavar="<radius>", nargs="*", type=int, help="(default: [100]")
-analysis_options.add_argument("--chamber-radius", metavar="<radius>", nargs="*", type=int, help="(default: [150])")
+analysis_options.add_argument("--signal-radius", metavar="<radius>", type=int, help="(default: 50)")
 analysis_options.add_argument("--edges-sigma", metavar="<sigma>", type=float, help="(default: 1)")
 
 args = parser.parse_args()
@@ -36,8 +41,10 @@ path_background, path_signal = (path2, path1)\
 
 options_loaded = json.load(path_settings.open()) if path_settings else dict()
 options = {
+  "background_inner_radius": args.background_inner_radius or options_loaded.get("background_inner_radius", 100),
+  "background_outer_radius": args.background_outer_radius or options_loaded.get("background_outer_radius", 150),
   "button_radius": args.button_radius or options_loaded.get("button_radius", [100]),
-  "chamber_radius": args.chamber_radius or options_loaded.get("chamber_radius", [150]),
+  "signal_radius": args.signal_radius or options_loaded.get("signal_radius", 50),
   "edges": {
     "sigma": args.edges_sigma or options_loaded.get("edges", dict()).get("sigma", 1.0)
   }
@@ -64,7 +71,9 @@ from skimage.util import img_as_ubyte
 data_background = ND2Reader(str(path_background))
 data_signal = ND2Reader(str(path_signal))
 
-count = min(len(data_background), len(data_signal), args.head)
+count = min(len(data_background), len(data_signal), args.head) if (args.only is None) else (args.only + 1)
+start = args.only or 0
+
 start_time = time()
 
 
@@ -79,7 +88,6 @@ def normalize(image):
   return image / np.max(image)
 
 def show_circle(image, center, radius):
-  print(image.shape)
   image = color.gray2rgb(image)
 
   circy, circx = circle_perimeter(*center, radius, shape=image.shape)
@@ -115,16 +123,13 @@ tq = tqdm(total=count) if not (args.test or args.silent) else None
 
 prev_center = None
 
-for index, (image_background, image_signal) in enumerate(zip(data_background[0:count], data_signal[0:count])):
-  if index != 11: continue
-
+for index, (image_background, image_signal) in enumerate(zip(data_background[start:count], data_signal[start:count])):
   edges = canny(image_background, sigma=options["edges"]["sigma"])
 
   if args.test == "edges":
     show_image(edges)
 
   button_center, button_radius, button_hough = detect_circle(edges, options["button_radius"])
-  # chamber_center, chamber_radius, chamber_hough = detect_circle(edges, options["chamber_radius"])
 
   # if prev_center:
   #   dist = np.linalg.norm(np.array(prev_center) - button_center)
@@ -146,17 +151,21 @@ for index, (image_background, image_signal) in enumerate(zip(data_background[0:c
 
   def disk_mask(center, radius, shape):
     out = np.zeros(shape)
-    out[disk(center, radius)] = 1.0
+    out[disk(center, radius, shape=shape)] = 1.0
     return out
 
-  signal_mask = disk_mask(button_center, button_radius, image_background.shape)
-  background_mask = np.ones(image_background.shape) - signal_mask
-
-  # if button_center[0] > 380:
-  #   show_circle(normalize(image_background), button_center, button_radius)
+  signal_mask = disk_mask(button_center, options["signal_radius"], image_background.shape)
+  background_mask = disk_mask(button_center, options["background_outer_radius"], image_background.shape)\
+    - disk_mask(button_center, options["background_inner_radius"], image_background.shape)
 
   background_data = image_signal * background_mask
   signal_data = image_signal * signal_mask
+
+  if args.test == "masks":
+    image = color.gray2rgb(normalize(image_signal))
+    image[:, :, 2] += background_mask * 0.1
+    image[:, :, 0] += signal_mask * 0.1
+    show_image(image.clip(0, 1))
 
   if args.test == "background_mask":
     show_image(background_data)
