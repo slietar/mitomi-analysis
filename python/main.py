@@ -30,7 +30,7 @@ path_out = Path(args.out).resolve() if args.out else None
 path_settings = Path(args.settings).resolve() if args.settings else None
 
 path_background, path_signal = (path2, path1)\
-  if any(x in path2.name.lower() for x in ["bf", "background"]) or any(x in path1.name.lower() for x in ["fitc", "signal"])\
+  if any(x in path2.name.lower() for x in ["bf", "background"]) or any(x in path1.name.lower() for x in ["cy3", "fitc", "signal"])\
   else (path1, path2)
 
 
@@ -112,7 +112,12 @@ def assign(index):
 output = pd.DataFrame(columns=["background", "signal", "signal_normalized", *assign_columns])
 tq = tqdm(total=count) if not (args.test or args.silent) else None
 
+
+prev_center = None
+
 for index, (image_background, image_signal) in enumerate(zip(data_background[0:count], data_signal[0:count])):
+  if index != 11: continue
+
   edges = canny(image_background, sigma=options["edges"]["sigma"])
 
   if args.test == "edges":
@@ -120,6 +125,11 @@ for index, (image_background, image_signal) in enumerate(zip(data_background[0:c
 
   button_center, button_radius, button_hough = detect_circle(edges, options["button_radius"])
   # chamber_center, chamber_radius, chamber_hough = detect_circle(edges, options["chamber_radius"])
+
+  # if prev_center:
+  #   dist = np.linalg.norm(np.array(prev_center) - button_center)
+
+  prev_center = button_center
 
   if args.test == "button_hough":
     show_image(normalize(button_hough))
@@ -141,6 +151,9 @@ for index, (image_background, image_signal) in enumerate(zip(data_background[0:c
 
   signal_mask = disk_mask(button_center, button_radius, image_background.shape)
   background_mask = np.ones(image_background.shape) - signal_mask
+
+  # if button_center[0] > 380:
+  #   show_circle(normalize(image_background), button_center, button_radius)
 
   background_data = image_signal * background_mask
   signal_data = image_signal * signal_mask
