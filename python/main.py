@@ -136,17 +136,41 @@ def layout_info(index):
 
   return num, col, row
 
+class Progress:
+  def __init__(self):
+    self.cols = 64
+    self.rows = 16
+
+    self.init()
+
+  def init(self):
+    for _ in range(self.rows):
+      for _ in range(self.cols):
+        print("\u2591", end="", file=sys.stderr)
+
+      print(file=sys.stderr)
+
+  # signal: 0, 1 or 2
+  def set(self, index, signal = 2):
+    x = index % self.cols
+    y = index // self.cols
+
+    print("\033[s" + f"\033[{x + 1}G" + f"\033[{self.rows - y}A" + chr(0x2591 + signal) + "\033[u", end="", file=sys.stderr, flush=True)
+
+
 
 output = pd.DataFrame(columns=["button_x", "button_y", "button_radius", "background", "raw_signal", "signal", "signal_radius", *layout_columns])
-tq = tqdm(total=count) if not (args.test or args.silent) else None
+(progress, tq) = (Progress(), tqdm(total=count)) if not (args.test or args.silent) else (None, None)
+
 
 
 prev_center = None
 start_time = time()
 
 for index, (image_background, image_signal) in enumerate(zip(data_background[start:count], data_signal[start:count])):
-  edges = canny(image_background, sigma=settings["edges_sigma"])
+  index += start
 
+  edges = canny(image_background, sigma=settings["edges_sigma"])
   button_center, button_radius, button_hough = detect_circle(edges, settings["button_radius"])
 
 
@@ -234,6 +258,8 @@ for index, (image_background, image_signal) in enumerate(zip(data_background[sta
 
   # Write to output
 
+  layout = layout_info(index)
+
   output.loc[index] = [
     button_center[1],
     button_center[0],
@@ -242,12 +268,15 @@ for index, (image_background, image_signal) in enumerate(zip(data_background[sta
     signal_value,
     signal_value - background_value,
     signal_radius,
-    *layout_info(index)
+    *layout
   ]
 
 
   if tq:
     tq.update()
+
+  if progress:
+    progress.set(layout[0] - 1)
 
 if tq:
   tq.close()
