@@ -79,9 +79,9 @@ signal_radius_test = range(10, 100, 2)
 def detect_circle(edges, test_radius):
   hough = hough_circle(edges, radius=test_radius)
   peaks = hough_circle_peaks(hough, test_radius, total_num_peaks=1)
-  accums, center_x, center_y, radius = np.array(peaks)[:, 0]
+  value, center_x, center_y, radius = np.array(peaks)[:, 0]
 
-  return (int(center_y), int(center_x)), int(radius), hough[0,]
+  return (int(center_y), int(center_x)), int(radius), hough[0,], value
 
 def normalize(image):
   return image / np.max(image)
@@ -159,7 +159,7 @@ class Progress:
 
 
 
-output = pd.DataFrame(columns=["button_x", "button_y", "button_radius", "background", "raw_signal", "signal", "signal_radius", *layout_columns])
+output = pd.DataFrame(columns=["button_x", "button_y", "button_radius", "button_hough", "background", "raw_signal", "signal", "signal_radius", *layout_columns])
 (progress, tq) = (Progress(), tqdm(total=count)) if not (args.test or args.silent) else (None, None)
 
 
@@ -171,7 +171,7 @@ for index, (image_background, image_signal) in enumerate(zip(data_background[sta
   index += start
 
   edges = canny(image_background, sigma=settings["edges_sigma"])
-  button_center, button_radius, button_hough = detect_circle(edges, settings["button_radius"])
+  button_center, button_radius, button_hough, button_hough_value = detect_circle(edges, settings["button_radius"])
 
 
   # Center check compared to neighbor
@@ -264,6 +264,7 @@ for index, (image_background, image_signal) in enumerate(zip(data_background[sta
     button_center[1],
     button_center[0],
     button_radius,
+    button_hough_value,
     background_value,
     signal_value,
     signal_value - background_value,
