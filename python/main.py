@@ -38,6 +38,8 @@ path_background, path_signal = (path2, path1)\
   if any(x in path2.name.lower() for x in ["bf", "background"]) or any(x in path1.name.lower() for x in ["cy3", "fitc", "signal"])\
   else (path1, path2)
 
+path_background, path_signal = (path1, path2)
+
 
 settings_loaded = json.load(path_settings.open()) if path_settings else dict()
 settings = {
@@ -58,11 +60,11 @@ if args.save_settings:
 import matplotlib.pyplot as plt
 from nd2reader import ND2Reader
 import numpy as np
+import scipy.ndimage
 from skimage import data, color
 from skimage.transform import hough_circle, hough_circle_peaks
 from skimage.feature import canny
 from skimage.draw import circle_perimeter, disk
-from skimage.util import img_as_ubyte
 
 
 data_background = ND2Reader(str(path_background))
@@ -114,8 +116,8 @@ def find_drop(sx, sy, fr = 1 - 1 / math.e):
       y_max = max(y, y_max)
 
 def disk_mask(center, radius, shape):
-  out = np.zeros(shape)
-  if radius > 0: out[disk(center, radius, shape=shape)] = 1.0
+  out = np.zeros(shape, dtype=np.uint16)
+  if radius > 0: out[disk(center, radius, shape=shape)] = 1
   return out
 
 
@@ -209,6 +211,12 @@ for index, (image_background, image_signal) in enumerate(zip(data_background[sta
   signal_data = image_signal * signal_mask
   signal_value = np.median(signal_data[signal_data.nonzero()])
 
+  signal_value_threshold = np.percentile(signal_data[signal_data.nonzero()], 20)
+  signal_mass_mask = image_signal * disk_mask(button_center, 100, image_signal.shape)
+  signal_mass = np.where(signal_mass_mask > signal_value_threshold, 1, 0)
+
+  signal_center = scipy.ndimage.center_of_mass(signal_mass)
+
 
   # Signal radius determination
 
@@ -223,8 +231,8 @@ for index, (image_background, image_signal) in enumerate(zip(data_background[sta
     radius_inner = radius - radius_semiinc
     radius_outer = radius + radius_semiinc
 
-    mask = disk_mask(button_center, radius_outer, image_background.shape)\
-      - disk_mask(button_center, radius_inner, image_background.shape)
+    mask = disk_mask(signal_center, radius_outer, image_background.shape)\
+      - disk_mask(signal_center, radius_inner, image_background.shape)
     data = image_signal * mask
     value = np.median(data[data.nonzero()]) - background_value
     value_threshold = value_max * (1 - 1 / math.e)
@@ -244,12 +252,12 @@ for index, (image_background, image_signal) in enumerate(zip(data_background[sta
   # Final tests
 
   if args.test == "masks":
-    signal_mask = disk_mask(button_center, 50, image_background.shape)
     mask_fr = 0.2
 
     image = color.gray2rgb(normalize(image_signal / 0xffff)) * (1 - mask_fr)
-    image[:, :, 2] += background_mask * mask_fr
     image[:, :, 0] += signal_mask * mask_fr
+    image[:, :, 1] += disk_mask(signal_center, signal_radius, image_signal.shape) * mask_fr
+    image[:, :, 2] += background_mask * mask_fr
     show_image(image.clip(0, 1))
 
   if args.test == "signal_circle":
