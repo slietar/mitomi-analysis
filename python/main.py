@@ -7,15 +7,18 @@ import sys
 from time import time
 from tqdm import tqdm
 
+import qsoft
+
+
 parser = argparse.ArgumentParser(description="MITOMI data analysis")
-parser.add_argument("--head", type=int, default=math.inf, help="Only process the first k images")
+parser.add_argument("--head", metavar="k", type=int, default=math.inf, help="Only process the first k images")
+parser.add_argument("--layout", metavar="path", help="Path to a QSoft log file")
 parser.add_argument("--only", type=int)
 parser.add_argument("--out", help="Path to an output file (defaults to stdout)")
 parser.add_argument("--silent", action="store_true")
 parser.add_argument("--test", choices=["button_circle", "button_hough", "edges", "masks", "signal_circle"])
 parser.add_argument("file1", metavar="background", help="Path to the background data")
 parser.add_argument("file2", metavar="signal", help="Path to the signal data")
-# + layout
 
 analysis_options = parser.add_argument_group("Analysis options")
 analysis_options.add_argument("--settings", metavar="<path>", type=str, help="Path to a settings file")
@@ -31,15 +34,18 @@ args = parser.parse_args()
 
 path1 = Path(args.file1).resolve()
 path2 = Path(args.file2).resolve()
+path_layout = Path(args.layout).resolve() if args.layout else None
 path_out = Path(args.out).resolve() if args.out else None
 path_settings = Path(args.settings).resolve() if args.settings else None
 
 path_background, path_signal = (path2, path1)\
-  if any(x in path2.name.lower() for x in ["bf", "background"]) or any(x in path1.name.lower() for x in ["cy3", "fitc", "signal"])\
-  else (path1, path2)
+  # if any(x in path2.name.lower() for x in ["bf", "background"]) or any(x in path1.name.lower() for x in ["cy3", "fitc", "signal"])\
+  # else (path1, path2)
 
 path_background, path_signal = (path1, path2)
 
+
+layout_data = qsoft.parse(path_layout) if path_layout else None
 
 settings_loaded = json.load(path_settings.open()) if path_settings else dict()
 settings = {
@@ -123,21 +129,6 @@ def disk_mask(center, radius, shape):
 
 # Layout settings
 
-layout_columns = ["number", "column", "row"]
-
-def layout_info(index):
-  row = math.floor(index / 64)
-  col = (index % 64)
-
-  if (row % 2) > 0:
-    col = 63 - col
-
-  num = row * 64 + col + 1
-  col = col + 1
-  row = row + 1
-
-  return num, col, row
-
 class Progress:
   def __init__(self):
     self.cols = 64
@@ -161,7 +152,7 @@ class Progress:
 
 
 
-output = pd.DataFrame(columns=["button_x", "button_y", "button_radius", "button_hough", "background", "raw_signal", "signal", "signal_radius", *layout_columns])
+output = pd.DataFrame(columns=["button_x", "button_y", "button_radius", "button_hough", "background", "raw_signal", "signal", "signal_x", "signal_y", "signal_radius", "number", "column", "row"] + (["sample"] if layout_data else list()))
 (progress, tq) = (Progress(), tqdm(total=count)) if not (args.test or args.silent) else (None, None)
 
 
@@ -264,9 +255,18 @@ for index, (image_background, image_signal) in enumerate(zip(data_background[sta
     show_circle(normalize(image_signal), button_center, round(signal_radius))
 
 
-  # Write to output
+  # Layout information
 
-  layout = layout_info(index)
+  row = math.floor(index / 64)
+  col = (index % 64)
+
+  if (row % 2) > 0:
+    col = 63 - col
+
+  chip_index = row * 64 + col
+
+
+  # Write to output
 
   output.loc[index] = [
     button_center[1],
@@ -276,16 +276,20 @@ for index, (image_background, image_signal) in enumerate(zip(data_background[sta
     background_value,
     signal_value,
     signal_value - background_value,
+    signal_center[1],
+    signal_center[0],
     signal_radius,
-    *layout
-  ]
+    chip_index + 1,
+    col + 1,
+    row + 1
+  ] + ([layout_data[chip_index]] if layout_data else list())
 
 
   if tq:
     tq.update()
 
   if progress:
-    progress.set(layout[0] - 1)
+    progress.set(chip_index)
 
 if tq:
   tq.close()
